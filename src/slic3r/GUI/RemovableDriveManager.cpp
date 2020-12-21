@@ -274,20 +274,64 @@ void RemovableDriveManager::eject_drive()
         		++ i;
         	}
 #endif
+
+		struct {
+			boost::optional<int> exit_code;
+			boost::optional<int> signal;
+			std::error_code ec{};
+		} result;
+
 		//std::cout<<"Ejecting "<<(*it).name<<" from "<< correct_path<<"\n";
 		// there is no usable command in c++ so terminal command is used instead
 		// but neither triggers "succesful safe removal messege"
 		BOOST_LOG_TRIVIAL(info) << "Ejecting started";
 		boost::process::ipstream istd_err;
     	boost::process::child child(
-#if __APPLE__		
-			boost::process::search_path("diskutil"), "eject", correct_path.c_str(), (boost::process::std_out & boost::process::std_err) > istd_err);
+#if __APPLE__	
+			boost::process::search_path("diskutil"), "eject", correct_path.c_str(), (boost::process::std_out& boost::process::std_err) > istd_err),
+			bp::on_exit = [&result, &child](int /*ignored*/, const std::error_code& ec) {
+				auto exit_status = child.native_exit_code();
+				result.exit_code = boost::make_optional(WIFEXITED(exit_status), WEXITSTATUS(exit_status));
+				result.signal = boost::make_optional(WIFSIGNALED(exit_status), WTERMSIG(exit_status));
+				result.ec = ec;
+			});
+			//boost::process::search_path("diskutil"), "eject", correct_path.c_str(), (boost::process::std_out & boost::process::std_err) > istd_err);
 			//Another option how to eject at mac. Currently not working.
 			//used insted of system() command;
 			//this->eject_device(correct_path);
+
+			std::string line;
+			while (child.running() && std::getline(istd_err, line)) {
+				BOOST_LOG_TRIVIAL(trace) << line;
+			}
+			// wait for command to finnish (blocks ui thread)
+			int pre_wait_exit_code = child.exit_code();
+			child.wait();
+
+			if (result.ec == ECHILD) {
+				BOOST_LOG_TRIVIAL(error) << "boost::process::child::wait() failed. Error code: " << result.ec.value();
+				// If wait fails with ECHILD the child process probably finishes erlier than wait began.
+				// That was the issue #5507
+			}
+			else if (result.ec) {
+				BOOST_LOG_TRIVIAL(error) << "boost::process::child::wait() failed during Ejecting. Error code: " << result.ec.value();
+				assert(m_callback_evt_handler);
+				if (m_callback_evt_handler)
+					wxPostEvent(m_callback_evt_handler, RemovableDriveEjectEvent(EVT_REMOVABLE_DRIVE_EJECTED, std::pair<DriveData, bool>(*it_drive_data, false)));
+				return;
+			}
+
+			if (result.exit_code) {
+				BOOST_LOG_TRIVIAL(error) << "Ejecting failed. Exit code: " << result.exit_code;
+				assert(m_callback_evt_handler);
+				if (m_callback_evt_handler)
+					wxPostEvent(m_callback_evt_handler, RemovableDriveEjectEvent(EVT_REMOVABLE_DRIVE_EJECTED, std::pair<DriveData, bool>(*it_drive_data, false)));
+				return;
+			}
+
 #else
     		boost::process::search_path("umount"), correct_path.c_str(), (boost::process::std_out & boost::process::std_err) > istd_err);
-#endif
+
 		std::string line;
 		while (child.running() && std::getline(istd_err, line)) {
 			BOOST_LOG_TRIVIAL(trace) << line;
@@ -297,11 +341,17 @@ void RemovableDriveManager::eject_drive()
 		std::error_code ec;
 		child.wait(ec);
 		int err = child.exit_code();
-		if (ec) {
+		if (ec == ECHILD) {
 			BOOST_LOG_TRIVIAL(error) << "boost::process::child::wait() failed. Error code: " << ec.value();
 			// If wait fails, it the child process probably finishes erlier than wait began.
 			// That was the issue #5507
 			err = pre_wait_exit_code;
+		}else if (ec){
+			BOOST_LOG_TRIVIAL(error) << "boost::process::child::wait() failed during Ejecting. Error code: " << ec.value();
+			assert(m_callback_evt_handler);
+			if (m_callback_evt_handler)
+				wxPostEvent(m_callback_evt_handler, RemovableDriveEjectEvent(EVT_REMOVABLE_DRIVE_EJECTED, std::pair<DriveData, bool>(*it_drive_data, false)));
+			return;
 		}
 		
     	if (err) {
@@ -311,6 +361,7 @@ void RemovableDriveManager::eject_drive()
 				wxPostEvent(m_callback_evt_handler, RemovableDriveEjectEvent(EVT_REMOVABLE_DRIVE_EJECTED, std::pair<DriveData, bool>(*it_drive_data, false)));
     		return;
     	}
+#endif
 		BOOST_LOG_TRIVIAL(info) << "Ejecting finished";
 
 		assert(m_callback_evt_handler);
