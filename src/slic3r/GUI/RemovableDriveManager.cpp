@@ -288,8 +288,10 @@ void RemovableDriveManager::eject_drive()
 		boost::process::ipstream istd_err;
     	boost::process::child child(
 #if __APPLE__	
-			boost::process::search_path("diskutil"), "eject", correct_path.c_str(), (boost::process::std_out& boost::process::std_err) > istd_err),
-			bp::on_exit = [&result, &child](int /*ignored*/, const std::error_code& ec) {
+			boost::process::search_path("diskutil"), 
+			"eject", correct_path.c_str(), 
+			(boost::process::std_out& boost::process::std_err) > istd_err),
+			boost::process::on_exit = [&result, &child](int /*ignored*/, const std::error_code& ec) {
 				auto exit_status = child.native_exit_code();
 				result.exit_code = boost::make_optional(WIFEXITED(exit_status), WEXITSTATUS(exit_status));
 				result.signal = boost::make_optional(WIFSIGNALED(exit_status), WTERMSIG(exit_status));
@@ -341,12 +343,7 @@ void RemovableDriveManager::eject_drive()
 		std::error_code ec;
 		child.wait(ec);
 		int err = child.exit_code();
-		if (ec == ECHILD) {
-			BOOST_LOG_TRIVIAL(error) << "boost::process::child::wait() failed. Error code: " << ec.value();
-			// If wait fails, it the child process probably finishes erlier than wait began.
-			// That was the issue #5507
-			err = pre_wait_exit_code;
-		}else if (ec){
+		if (ec){
 			BOOST_LOG_TRIVIAL(error) << "boost::process::child::wait() failed during Ejecting. Error code: " << ec.value();
 			assert(m_callback_evt_handler);
 			if (m_callback_evt_handler)
