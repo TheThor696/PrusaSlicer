@@ -310,7 +310,7 @@ void RemovableDriveManager::eject_drive()
 			int pre_wait_exit_code = child.exit_code();
 			child.wait();
 
-			if (result.ec == ECHILD) {
+			if (result.ec && result.ec.value() == ECHILD) {
 				BOOST_LOG_TRIVIAL(error) << "boost::process::child::wait() failed. Error code: " << result.ec.value();
 				// If wait fails with ECHILD the child process probably finishes erlier than wait began.
 				// That was the issue #5507
