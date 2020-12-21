@@ -290,7 +290,7 @@ void RemovableDriveManager::eject_drive()
 #if __APPLE__	
 			boost::process::search_path("diskutil"), 
 			"eject", correct_path.c_str(), 
-			(boost::process::std_out& boost::process::std_err) > istd_err),
+			(boost::process::std_out& boost::process::std_err) > istd_err,
 			boost::process::on_exit = [&result, &child](int /*ignored*/, const std::error_code& ec) {
 				auto exit_status = child.native_exit_code();
 				result.exit_code = boost::make_optional(WIFEXITED(exit_status), WEXITSTATUS(exit_status));
